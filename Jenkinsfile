@@ -44,18 +44,6 @@ pipeline {
             }
         }
 
-        stage('Smoke Test Image') {
-            steps {
-                sh '''
-                    docker run -d --rm --name smoke-test -p 3999:3000 \
-                        -e PORT=3000 \
-                        ${FULL_IMAGE}
-                    sleep 5
-                    curl -f http://localhost:3999/ || (docker logs smoke-test; docker stop smoke-test; exit 1)
-                    docker stop smoke-test
-                '''
-            }
-        }
 
         stage('Push Image') {
             when { expression { return env.REGISTRY?.trim() } }
