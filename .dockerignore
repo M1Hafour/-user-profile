@@ -4,3 +4,7 @@ npm-debug.log
 .git
 .gitignore
 *.zip
+Dockerfile
+docker-compose.yaml
+Jenkinsfile
+README.md
