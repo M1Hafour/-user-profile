@@ -58,7 +58,7 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                withCredentials([file(credentialsId: 'app-env-file', variable: 'ENV_FILE')]) {
+                withCredentials([file(credentialsId: 'user-profile-app-env', variable: 'ENV_FILE')]) {
                     sh '''
                         cp "$ENV_FILE" .env
                         export MONGO_USERNAME="$MONGO_CREDS_USR"
