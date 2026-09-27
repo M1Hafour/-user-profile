@@ -30,12 +30,12 @@ pipeline {
         stage('Install & Test') {
             steps {
                 sh '''
-                    docker run --rm \
-                        -v "$PWD":/app -w /app \
-                        node:20-alpine \
-                        sh -c "if [ -f package.json ]; then npm ci && npm test --if-present; fi"
+                    if [ -f package.json ]; then
+                        npm ci
+                        npm test --if-present
+                    fi
                 '''
-		}
+            }
         }
 
         stage('Build Image') {
@@ -63,7 +63,7 @@ pipeline {
                         cp "$ENV_FILE" .env
                         export MONGO_USERNAME="$MONGO_CREDS_USR"
                         export MONGO_PASSWORD="$MONGO_CREDS_PSW"
-                        docker compose pull --ignore-pull-failures || true
+                        docker compose pull || true
                         docker compose up -d --remove-orphans
                         docker image prune -f
                     '''
