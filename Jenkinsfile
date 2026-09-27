@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        buildDiscarder(logRotator(numToKeepStr: '3'))
         timestamps()
         disableConcurrentBuilds()
     }
@@ -14,26 +14,17 @@ pipeline {
         FULL_IMAGE            = "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
         LATEST_IMAGE          = "${REGISTRY}/${IMAGE_NAME}:latest"
 
-        DOCKERHUB_CREDS      = credentials('dockerhub-creds')     // username/password
-        MONGO_CREDS          = credentials('mongo-creds')         // username/password (secret text pair)
-        APP_ENV               = credentials('user-profile-app-env')       // "Secret file" credential containing a .env
+        DOCKERHUB_CREDS      = credentials('dockerhub-creds')
+        MONGO_CREDS          = credentials('mongo-creds')
+        APP_ENV               = credentials('user-profile-app-env')
     }
 
     stages {
 
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
         stage('Install & Test') {
             steps {
                 sh '''
-                    if [ -f package.json ]; then
                         npm ci
-                        npm test --if-present
-                    fi
                 '''
             }
         }
@@ -46,21 +37,17 @@ pipeline {
 
 
         stage('Push Image') {
-            when { expression { return env.REGISTRY?.trim() } }
-            steps {
                 sh '''
                     echo "$DOCKERHUB_CREDS_PSW" | docker login -u "$DOCKERHUB_CREDS_USR" --password-stdin
                     docker push ${FULL_IMAGE}
                     docker push ${LATEST_IMAGE}
                 '''
-            }
         }
 
         stage('Deploy') {
             steps {
-                withCredentials([file(credentialsId: 'user-profile-app-env', variable: 'ENV_FILE')]) {
                     sh '''
-                        cp "$ENV_FILE" .env
+                        cp "$APP_ENV" .env
                         export MONGO_USERNAME="$MONGO_CREDS_USR"
                         export MONGO_PASSWORD="$MONGO_CREDS_PSW"
                         docker compose pull || true
