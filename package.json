@@ -1,0 +1,17 @@
+{
+  "name": "user-profile-app",
+  "version": "1.0.0",
+  "description": "Simple user profile app: plain HTML/JS frontend, Express backend, MongoDB storage. Inspired by nanuchi/developing-with-docker.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongoose": "^8.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}

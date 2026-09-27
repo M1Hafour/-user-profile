@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Profile App</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="wrapper">
+    <h1>User Profile App</h1>
+    <p class="subtitle">Plain HTML/JS frontend &rarr; Express API &rarr; MongoDB</p>
+
+    <form id="user-form">
+      <input type="text" id="name" placeholder="Name" required>
+      <input type="email" id="email" placeholder="Email" required>
+      <input type="text" id="city" placeholder="City">
+      <button type="submit">Add user</button>
+    </form>
+
+    <div id="message"></div>
+
+    <table id="users-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Email</th>
+          <th>City</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="users-body">
+        <!-- rows injected by script.js -->
+      </tbody>
+    </table>
+  </div>
+
+  <script src="/script.js"></script>
+</body>
+</html>
