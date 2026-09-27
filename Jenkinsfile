@@ -30,14 +30,12 @@ pipeline {
         stage('Install & Test') {
             steps {
                 sh '''
-                    if [ -f package.json ]; then
-                        npm ci
-                        if npm run | grep -q "test"; then
-                            npm test --if-present
-                        fi
-                    fi
+                    docker run --rm \
+                        -v "$PWD":/app -w /app \
+                        node:20-alpine \
+                        sh -c "if [ -f package.json ]; then npm ci && npm test --if-present; fi"
                 '''
-            }
+		}
         }
 
         stage('Build Image') {
