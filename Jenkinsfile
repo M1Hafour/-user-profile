@@ -55,7 +55,6 @@ pipeline {
                         docker image prune -f
                     '''
                 }
-            }
         }
     }
 
