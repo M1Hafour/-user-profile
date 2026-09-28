@@ -37,11 +37,13 @@ pipeline {
 
 
         stage('Push Image') {
-                sh '''
-                    echo "$DOCKERHUB_CREDS_PSW" | docker login -u "$DOCKERHUB_CREDS_USR" --password-stdin
-                    docker push ${FULL_IMAGE}
-                    docker push ${LATEST_IMAGE}
-                '''
+	    steps {
+		    sh '''
+                       echo "$DOCKERHUB_CREDS_PSW" | docker login -u "$DOCKERHUB_CREDS_USR" --password-stdin
+                       docker push ${FULL_IMAGE}
+                       docker push ${LATEST_IMAGE}
+                    '''
+	         }
         }
 
         stage('Deploy') {
