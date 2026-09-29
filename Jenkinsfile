@@ -10,11 +10,7 @@ pipeline {
     environment {
         REGISTRY            = 'docker.io/mohamedhafour'          
         IMAGE_NAME           = 'user-profile-app'
-<<<<<<< HEAD
         IMAGE_TAG             = "${env.GIT_COMMIT.take(7)}"
-=======
-        IMAGE_TAG             = "${env.BUILD_NUMBER}"
->>>>>>> refs/remotes/origin/dev
         FULL_IMAGE            = "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
         LATEST_IMAGE          = "${REGISTRY}/${IMAGE_NAME}:latest"
 
