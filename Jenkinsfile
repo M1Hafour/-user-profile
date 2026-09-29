@@ -10,7 +10,7 @@ pipeline {
     environment {
         REGISTRY            = 'docker.io/mohamedhafour'          
         IMAGE_NAME           = 'user-profile-app'
-        IMAGE_TAG             = "${env.BUILD_NUMBER}"
+        IMAGE_TAG             = "${env.GIT_COMMIT.take(7)}"
         FULL_IMAGE            = "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
         LATEST_IMAGE          = "${REGISTRY}/${IMAGE_NAME}:latest"
 
@@ -32,6 +32,8 @@ pipeline {
         stage('Build Image') {
             steps {
                 sh "docker build -t ${FULL_IMAGE} -t ${LATEST_IMAGE} ."
+                sh "trivy image ${FULL_IMAGE}"
+
             }
         }
 
@@ -66,6 +68,12 @@ pipeline {
         }
         failure {
             echo "Pipeline failed — check the stage logs above."
+            slackSend(
+                channel: '#ci-alerts',
+                color: 'danger',
+                message: "❌ *${env.JOB_NAME}* build #${env.BUILD_NUMBER} failed.\n<${env.BUILD_URL}|View console output>"
+            )
+
         }
     }
 }
