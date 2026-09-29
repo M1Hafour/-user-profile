@@ -10,7 +10,11 @@ pipeline {
     environment {
         REGISTRY            = 'docker.io/mohamedhafour'          
         IMAGE_NAME           = 'user-profile-app'
+<<<<<<< HEAD
         IMAGE_TAG             = "${env.GIT_COMMIT.take(7)}"
+=======
+        IMAGE_TAG             = "${env.BUILD_NUMBER}"
+>>>>>>> refs/remotes/origin/dev
         FULL_IMAGE            = "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
         LATEST_IMAGE          = "${REGISTRY}/${IMAGE_NAME}:latest"
 
@@ -68,12 +72,15 @@ pipeline {
         }
         failure {
             echo "Pipeline failed — check the stage logs above."
+<<<<<<< HEAD
             slackSend(
                 channel: '#ci-alerts',
                 color: 'danger',
                 message: "❌ *${env.JOB_NAME}* build #${env.BUILD_NUMBER} failed.\n<${env.BUILD_URL}|View console output>"
             )
 
+=======
+>>>>>>> refs/remotes/origin/dev
         }
     }
 }
