@@ -23,16 +23,37 @@ pipeline {
 
         stage('Install & Test') {
             steps {
+	        script {
+                    def lockHash = sh(script: "sha256sum package-lock.json 2>/dev/null | cut -d' ' -f1 || echo none", returnStdout: true).trim()
+               	    env.CACHE_DIR = "${JENKINS_HOME}/npm-cache/${lockHash}"
+	        }
                 sh '''
-                        npm ci
+                    if [ -f package.json ]; then
+                        if [ -d "$CACHE_DIR" ]; then
+                            echo "Cache hit — reusing node_modules for this lockfile"
+                            cp -a "$CACHE_DIR" ./node_modules
+                        else
+                            npm ci
+                            mkdir -p "$(dirname "$CACHE_DIR")"
+                            cp -a ./node_modules "$CACHE_DIR"
+                        fi
+                        npm test --if-present
+                    fi
                 '''
             }
         }
 
+        stage('Dependency Audit') {
+            steps {
+                sh 'npm audit --audit-level=high || true'
+            }
+        }
+
+
         stage('Build Image') {
             steps {
                 sh "docker build -t ${FULL_IMAGE} -t ${LATEST_IMAGE} ."
-                sh "trivy image ${FULL_IMAGE}"
+                sh "trivy image --timeout 15m ${FULL_IMAGE}"
 
             }
         }
@@ -77,7 +98,7 @@ pipeline {
             slackSend(
                 channel: '#jenkins',
                 color: 'danger',
-                message: "❌ *${env.JOB_NAME}* build #${env.BUILD_NUMBER} failed.\n<${env.BUILD_URL}|View console output>"
+                message: "*${env.JOB_NAME}* build #${env.BUILD_NUMBER} failed.\n<${env.BUILD_URL}|View console output>"
             )
 
         }
