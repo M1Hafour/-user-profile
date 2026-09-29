@@ -69,18 +69,21 @@ pipeline {
     post {
         success {
             echo "Deployed ${FULL_IMAGE} successfully."
+            slackSend(
+                channel: '#jenkins',
+                color: 'sucess',
+                message: " *${env.JOB_NAME}* build #${env.BUILD_NUMBER} succed."
+            )
+
         }
         failure {
             echo "Pipeline failed — check the stage logs above."
-<<<<<<< HEAD
             slackSend(
-                channel: '#ci-alerts',
+                channel: '#jenkins',
                 color: 'danger',
                 message: "❌ *${env.JOB_NAME}* build #${env.BUILD_NUMBER} failed.\n<${env.BUILD_URL}|View console output>"
             )
 
-=======
->>>>>>> refs/remotes/origin/dev
         }
     }
 }
