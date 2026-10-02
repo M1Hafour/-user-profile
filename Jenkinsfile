@@ -102,6 +102,7 @@ pipeline {
                     cp "$APP_ENV" .env
                     export MONGO_USERNAME="$MONGO_CREDS_USR"
                     export MONGO_PASSWORD="$MONGO_CREDS_PSW"
+		    export COMPOSE_PROJECT_NAME=user-profile-app
                     docker compose pull || true
                     docker compose up -d --remove-orphans
                     docker image prune -f
