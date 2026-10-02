@@ -4,11 +4,5 @@ npm-debug.log
 .git
 .gitignore
 *.zip
-<<<<<<< HEAD
-=======
-Dockerfile
-docker-compose.yaml
-Jenkinsfile
 README.md
 .*
->>>>>>> refs/remotes/origin/main
