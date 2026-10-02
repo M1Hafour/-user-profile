@@ -1,6 +1,6 @@
 services:
   app:
-    build: .
+    image: docker.io/mohamedhafour/user-profile-app:latest
     container_name: user-profile-app
     restart: unless-stopped
     ports:
