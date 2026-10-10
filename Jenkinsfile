@@ -33,7 +33,7 @@ pipeline {
                             echo "Cache hit — reusing node_modules for this lockfile"
                             cp -a "$CACHE_DIR" ./node_modules
                         else
-                            npm install
+                            npm ci
                             mkdir -p "$(dirname "$CACHE_DIR")"
                             cp -a ./node_modules "$CACHE_DIR"
                         fi
