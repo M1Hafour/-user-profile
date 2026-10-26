@@ -3,8 +3,7 @@ services:
     image: docker.io/mohamedhafour/user-profile-app:latest
     container_name: user-profile-app
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+
     environment:
       MONGO_USERNAME: ${MONGO_USERNAME}
       MONGO_PASSWORD: ${MONGO_PASSWORD}
@@ -54,7 +53,29 @@ services:
         condition: service_healthy
     networks:
       - mongo-network
-
+      
+ 
+  nginx:
+    image: nginx:stable-alpine
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    volumes:
+      # Mount the directory, not the single file: git checkout replaces files
+      # (new inode), which would leave a single-file bind mount showing stale content.
+      - ./nginx:/etc/nginx/conf.d:ro
+    depends_on:
+      - app
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - mongo-network
+ 
 networks:
   mongo-network:
 

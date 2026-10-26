@@ -24,26 +24,17 @@ pipeline {
         stage('Install') {
             steps {
                 script {
-                    def lockHash = sh(script: "sha256sum package-lock.json 2>/dev/null | cut -d' ' -f1 || echo none", returnStdout: true).trim()
-                    env.CACHE_DIR = "${JENKINS_HOME}/npm-cache/${lockHash}"
-                }
-                sh '''
-                    if [ -f package.json ]; then
-                        if [ -d "$CACHE_DIR" ]; then
-                            echo "Cache hit — reusing node_modules for this lockfile"
-                            cp -a "$CACHE_DIR" ./node_modules
-                        else
-                            npm ci
-                            mkdir -p "$(dirname "$CACHE_DIR")"
-                            cp -a ./node_modules "$CACHE_DIR"
-                        fi
-                    fi
+                sh '''      
+                    npm install
+                    cp -a ./node_modules "$CACHE_DIR"
                 '''
             }
         }
 
         stage('Test & Coverage') {
             steps {
+                // Assumes Jest. If your app uses Mocha/another runner, swap this command
+                // and the coverage tool accordingly — ask me to adjust once confirmed.
                 sh '''
                     if [ -f package.json ]; then
                         if npx --yes jest --version >/dev/null 2>&1; then
@@ -56,6 +47,7 @@ pipeline {
             }
             post {
                 always {
+                    // Publishes coverage HTML report as a build artifact if Jest produced one
                     archiveArtifacts artifacts: 'coverage/**', allowEmptyArchive: true
                     junit testResults: 'junit.xml', allowEmptyResults: true
                 }
@@ -64,6 +56,8 @@ pipeline {
 
         stage('Code Scan (ESLint)') {
             steps {
+                // Non-blocking to start. Remove `|| true` once the codebase is clean
+                // enough that lint failures should actually stop the pipeline.
                 sh 'npx --yes eslint . --format stylish || true'
             }
         }
@@ -82,6 +76,8 @@ pipeline {
 
         stage('Docker Image Scan') {
             steps {
+                // Blocking: fails the build on HIGH/CRITICAL CVEs in the built image.
+                // Drop --exit-code / change severity if you want this informational instead.
                 sh "trivy image --timeout 15m --severity HIGH,CRITICAL --exit-code 1 ${FULL_IMAGE}"
             }
         }
@@ -102,9 +98,15 @@ pipeline {
                     cp "$APP_ENV" .env
                     export MONGO_USERNAME="$MONGO_CREDS_USR"
                     export MONGO_PASSWORD="$MONGO_CREDS_PSW"
-		    export COMPOSE_PROJECT_NAME=user-profile-app
-                    docker compose pull || true
+                    export COMPOSE_PROJECT_NAME=user-profile-app
+                    # The app image must really be pulled now: if this fails, stop here
+                    # instead of silently redeploying a stale local copy.
+                    docker compose pull app
+                    docker compose pull mongodb mongo-express nginx || true
                     docker compose up -d --remove-orphans
+                    # nginx only reads its config at start; compose won't recreate it
+                    # when just the mounted file changed, so reload to pick up edits.
+                    docker compose exec -T nginx nginx -s reload || echo "nginx reload skipped"
                     docker image prune -f
                 '''
             }
