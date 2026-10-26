@@ -23,13 +23,12 @@ pipeline {
 
         stage('Install') {
             steps {
-                script {
-                	sh '''      
-                    		npm install
-                    		cp -a ./node_modules "$CACHE_DIR"
-                	'''
-            		}	
-        	}
+                // Clean, lockfile-exact install. If this fails with "package.json and
+                // package-lock.json are not in sync", run `npm install` locally once and
+                // commit the updated package-lock.json (don't switch this to `npm install`).
+                sh 'npm ci'
+            }
+        }
 
         stage('Test & Coverage') {
             steps {
