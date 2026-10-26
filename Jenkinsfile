@@ -14,6 +14,11 @@ pipeline {
         FULL_IMAGE            = "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
         LATEST_IMAGE          = "${REGISTRY}/${IMAGE_NAME}:latest"
 
+        // Frontend (nginx + static files) image
+        FRONTEND_IMAGE_NAME   = 'user-profile-frontend'
+        FRONTEND_FULL_IMAGE   = "${REGISTRY}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}"
+        FRONTEND_LATEST_IMAGE = "${REGISTRY}/${FRONTEND_IMAGE_NAME}:latest"
+
         DOCKERHUB_CREDS      = credentials('dockerhub-creds')
         MONGO_CREDS          = credentials('mongo-creds')
         APP_ENV               = credentials('user-profile-app-env')
@@ -26,7 +31,7 @@ pipeline {
                 // Clean, lockfile-exact install. If this fails with "package.json and
                 // package-lock.json are not in sync", run `npm install` locally once and
                 // commit the updated package-lock.json (don't switch this to `npm install`).
-                sh 'npm install'
+                sh 'npm ci'
             }
         }
 
@@ -67,9 +72,14 @@ pipeline {
             }
         }
 
-        stage('Build Image') {
+        stage('Build Images') {
             steps {
+                // Backend (API) image
                 sh "docker build -t ${FULL_IMAGE} -t ${LATEST_IMAGE} ."
+                // Frontend image (nginx + static files); ./frontend is its build context
+                sh "docker build -t ${FRONTEND_FULL_IMAGE} -t ${FRONTEND_LATEST_IMAGE} ./frontend"
+                // Fail early if the nginx config baked into the frontend image is invalid
+                sh "docker run --rm ${FRONTEND_FULL_IMAGE} nginx -t"
             }
         }
 
@@ -77,7 +87,13 @@ pipeline {
             steps {
                 // Blocking: fails the build on HIGH/CRITICAL CVEs in the built image.
                 // Drop --exit-code / change severity if you want this informational instead.
-                sh "trivy image --timeout 15m --severity HIGH,CRITICAL --exit-code 1 ${FULL_IMAGE}"
+                // Scans both images and reports both before failing, so one run shows everything.
+                sh '''
+                    rc=0
+                    trivy image --timeout 15m --severity HIGH,CRITICAL --exit-code 1 ${FULL_IMAGE} || rc=1
+                    trivy image --timeout 15m --severity HIGH,CRITICAL --exit-code 1 ${FRONTEND_FULL_IMAGE} || rc=1
+                    exit $rc
+                '''
             }
         }
 
@@ -87,6 +103,8 @@ pipeline {
                     echo "$DOCKERHUB_CREDS_PSW" | docker login -u "$DOCKERHUB_CREDS_USR" --password-stdin
                     docker push ${FULL_IMAGE}
                     docker push ${LATEST_IMAGE}
+                    docker push ${FRONTEND_FULL_IMAGE}
+                    docker push ${FRONTEND_LATEST_IMAGE}
                 '''
             }
         }
@@ -98,15 +116,38 @@ pipeline {
                     export MONGO_USERNAME="$MONGO_CREDS_USR"
                     export MONGO_PASSWORD="$MONGO_CREDS_PSW"
                     export COMPOSE_PROJECT_NAME=user-profile-app
-                    # The app image must really be pulled now: if this fails, stop here
-                    # instead of silently redeploying a stale local copy.
-                    docker compose pull app
-                    docker compose pull mongodb mongo-express nginx || true
+                    # Our two images (API + frontend) must really be pulled: if this fails,
+                    # stop here instead of silently redeploying a stale local copy.
+                    docker compose pull app nginx
+                    docker compose pull mongodb mongo-express || true
                     docker compose up -d --remove-orphans
-                    # nginx only reads its config at start; compose won't recreate it
-                    # when just the mounted file changed, so reload to pick up edits.
-                    docker compose exec -T nginx nginx -s reload || echo "nginx reload skipped"
                     docker image prune -f
+                '''
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                sh '''
+                    export COMPOSE_PROJECT_NAME=user-profile-app
+                    # Port nginx is published on: NGINX_PORT from the .env secret, default 80.
+                    PORT_TO_CHECK=$(grep -E '^NGINX_PORT=' .env | tail -n 1 | cut -d= -f2 | tr -d '\\r"')
+                    PORT_TO_CHECK=${PORT_TO_CHECK:-80}
+                    BASE="http://localhost:${PORT_TO_CHECK}"
+
+                    for i in $(seq 1 15); do
+                        if curl -fsS "$BASE/" | grep -q "User Profile App" && curl -fsS "$BASE/health" | grep -q '"mongo":"connected"'; then
+                            echo "Frontend is served and the backend is connected to MongoDB."
+                            exit 0
+                        fi
+                        echo "Not ready yet (attempt $i of 15)..."
+                        sleep 4
+                    done
+
+                    echo "Deployment verification FAILED"
+                    docker compose ps
+                    docker compose logs --tail 30 nginx app
+                    exit 1
                 '''
             }
         }

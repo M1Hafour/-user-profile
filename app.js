@@ -1,12 +1,13 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const path = require('path');
 const User = require('./models/User');
 
 const app = express();
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+
+// API only. The static frontend lives in frontend/ and is served by nginx,
+// which forwards /api/* and /health to this app.
 
 // --- REST API ---
 

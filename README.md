@@ -7,8 +7,8 @@ web-based admin UI for the database — same setup style as
 
 ## Stack
 
-- **Frontend** — plain `index.html` + `script.js` + `style.css` (no framework, no build step)
-- **Backend** — Express REST API (`server.js`)
+- **Frontend** — plain `index.html` + `script.js` + `style.css` in `frontend/public/` (no framework, no build step), served by **nginx** from its own image
+- **Backend** — Express REST API only (`server.js` / `app.js`); nginx forwards `/api/*` and `/health` to it
 - **Database** — MongoDB via Mongoose
 - **Admin UI** — Mongo Express, a web GUI for browsing/editing the database
 
@@ -23,12 +23,16 @@ Starts the app, MongoDB, and Mongo Express together.
    The defaults (`admin` / `password`) are fine for local development —
    change them if you like.
 
-2. **Build and start everything**
+2. **Build the two app images, then start everything.** `docker-compose.yaml`
+   runs prebuilt images (the Jenkins pipeline builds and pushes them), so
+   locally build them under the same names first:
    ```bash
-   docker compose up --build
+   docker build -t docker.io/mohamedhafour/user-profile-app:latest .
+   docker build -t docker.io/mohamedhafour/user-profile-frontend:latest ./frontend
+   docker compose up
    ```
 
-3. **Open the app**: http://localhost:3000
+3. **Open the app**: http://localhost (nginx on port 80; set `NGINX_PORT` in `.env` to change it)
    Add a user through the form — it's saved straight to MongoDB.
 
 4. **Open Mongo Express** (DB admin UI): http://localhost:8081
@@ -82,10 +86,18 @@ Useful for understanding what Compose is doing under the hood.
      -e MONGO_HOSTNAME=mongodb \
      -e MONGO_PORT=27017 \
      -e MONGO_DB=my-db \
-     --net mongo-network --name user-profile-app user-profile-app:1.0
+     --net mongo-network --network-alias app --name user-profile-app user-profile-app:1.0
+   ```
+   The `app` network alias is the hostname the frontend's nginx proxies to.
+   The backend serves only the API (try http://localhost:3000/api/users).
+
+6. **Build and run the frontend** (nginx serving the UI, proxying to `app`):
+   ```bash
+   docker build -t user-profile-frontend:1.0 ./frontend
+   docker run -d -p 80:80 --net mongo-network --name frontend user-profile-frontend:1.0
    ```
 
-6. Visit http://localhost:3000 for the app and http://localhost:8081 for
+7. Visit http://localhost for the app and http://localhost:8081 for
    Mongo Express.
 
 ## Option C — Run the app locally, DB in Docker
@@ -98,6 +110,8 @@ Useful for understanding what Compose is doing under the hood.
    MONGO_USERNAME=admin MONGO_PASSWORD=password MONGO_HOSTNAME=localhost \
    MONGO_PORT=27017 MONGO_DB=my-db node server.js
    ```
+   This runs the API only (http://localhost:3000/api/users). The UI is served
+   by nginx, so use Option A or B to see it.
 
 ## API
 
@@ -112,15 +126,19 @@ Useful for understanding what Compose is doing under the hood.
 
 ```
 user-profile-app/
-├── server.js              # Express app + REST API + Mongo connection
+├── app.js                 # Express app + REST API (no static files)
+├── server.js              # Mongo connection + starts the app
 ├── models/
 │   └── User.js              # Mongoose schema
-├── public/                 # Static frontend, served by Express
-│   ├── index.html
-│   ├── style.css
-│   └── script.js
-├── Dockerfile               # Multi-stage build for the app image
-├── docker-compose.yaml      # app + mongodb + mongo-express
+├── frontend/                # Static frontend, served by nginx
+│   ├── Dockerfile             # nginx image: static files + config baked in
+│   ├── nginx.conf             # serves the UI, proxies /api and /health to the app
+│   └── public/
+│       ├── index.html
+│       ├── style.css
+│       └── script.js
+├── Dockerfile               # Multi-stage build for the backend (API) image
+├── docker-compose.yaml      # nginx (frontend) + app (API) + mongodb + mongo-express
 ├── .dockerignore
 ├── .env.example
 └── package.json

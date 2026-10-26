@@ -4,5 +4,15 @@ npm-debug.log
 .git
 .gitignore
 *.zip
+Dockerfile
+docker-compose.yaml
+Jenkinsfile
 README.md
+frontend
+nginx
+__tests__
+coverage
+junit.xml
+jest.config.js
+eslint.config.js
 .*
