@@ -24,12 +24,12 @@ pipeline {
         stage('Install') {
             steps {
                 script {
-                sh '''      
-                    npm install
-                    cp -a ./node_modules "$CACHE_DIR"
-                '''
-            }
-        }
+                	sh '''      
+                    		npm install
+                    		cp -a ./node_modules "$CACHE_DIR"
+                	'''
+            		}	
+        	}
 
         stage('Test & Coverage') {
             steps {
