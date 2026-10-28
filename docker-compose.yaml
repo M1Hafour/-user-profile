@@ -92,3 +92,4 @@ networks:
 
 volumes:
   mongo-data:
+  nginx-certs:
