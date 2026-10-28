@@ -7,7 +7,7 @@ web-based admin UI for the database — same setup style as
 
 ## Stack
 
-- **Frontend** — plain `index.html` + `script.js` + `style.css` in `frontend/public/` (no framework, no build step), served by **nginx** from its own image
+- **Frontend** — plain `index.html` + `script.js` + `style.css` in `frontend/public/` (no framework, no build step), served over HTTPS by **nginx** from its own image
 - **Backend** — Express REST API only (`server.js` / `app.js`); nginx forwards `/api/*` and `/health` to it
 - **Database** — MongoDB via Mongoose
 - **Admin UI** — Mongo Express, a web GUI for browsing/editing the database
@@ -32,7 +32,10 @@ Starts the app, MongoDB, and Mongo Express together.
    docker compose up
    ```
 
-3. **Open the app**: http://localhost (nginx on port 80; set `NGINX_PORT` in `.env` to change it)
+3. **Open the app**: https://localhost (nginx; http://localhost redirects there).
+   The default certificate is self-signed, so your browser will show a warning
+   the first time — see [HTTPS](#https) below. Set `NGINX_PORT` /
+   `NGINX_HTTPS_PORT` in `.env` to use other ports than 80 / 443.
    Add a user through the form — it's saved straight to MongoDB.
 
 4. **Open Mongo Express** (DB admin UI): http://localhost:8081
@@ -94,11 +97,12 @@ Useful for understanding what Compose is doing under the hood.
 6. **Build and run the frontend** (nginx serving the UI, proxying to `app`):
    ```bash
    docker build -t user-profile-frontend:1.0 ./frontend
-   docker run -d -p 80:80 --net mongo-network --name frontend user-profile-frontend:1.0
+   docker run -d -p 80:80 -p 443:443 -v nginx-certs:/etc/nginx/certs \
+     --net mongo-network --name frontend user-profile-frontend:1.0
    ```
 
-7. Visit http://localhost for the app and http://localhost:8081 for
-   Mongo Express.
+7. Visit https://localhost for the app (accept the self-signed certificate
+   warning) and http://localhost:8081 for Mongo Express.
 
 ## Option C — Run the app locally, DB in Docker
 
@@ -112,6 +116,42 @@ Useful for understanding what Compose is doing under the hood.
    ```
    This runs the API only (http://localhost:3000/api/users). The UI is served
    by nginx, so use Option A or B to see it.
+
+## HTTPS
+
+nginx terminates TLS: port 80 redirects to HTTPS (port 443).
+
+- **Default: a self-signed certificate.** On first start the frontend container
+  creates one for `localhost`, `127.0.0.1` and `::1` and keeps it in the
+  `nginx-certs` volume (never in the image, so the private key is not pushed to
+  Docker Hub). It survives redeploys and is renewed automatically within 30
+  days of expiry. Browsers warn about self-signed certificates; that is expected.
+  To trust it instead of clicking through, copy it out with
+  `docker cp nginx:/etc/nginx/certs/tls.crt .` and import it into your OS or
+  browser trust store.
+- **Another name or IP** (e.g. opening the app from another machine at
+  `https://192.168.1.20`): set `TLS_SAN` in `.env`, for example
+  `TLS_SAN=DNS:myserver.local,IP:192.168.1.20`, then make a new certificate:
+  ```bash
+  docker compose exec nginx rm /etc/nginx/certs/tls.crt /etc/nginx/certs/tls.key
+  docker compose up -d --force-recreate nginx
+  ```
+- **Your own certificate** (mkcert, a company CA, Let's Encrypt): put the full
+  chain and the key into the volume and reload nginx. A certificate you add is
+  never overwritten.
+  ```bash
+  docker cp fullchain.pem nginx:/etc/nginx/certs/tls.crt
+  docker cp privkey.pem   nginx:/etc/nginx/certs/tls.key
+  docker exec nginx nginx -s reload
+  ```
+  [mkcert](https://github.com/FiloSottile/mkcert) gives a locally trusted
+  certificate with no browser warning.
+- **Ports:** `NGINX_PORT` (default 80) and `NGINX_HTTPS_PORT` (default 443) in
+  `.env`; the HTTP→HTTPS redirect follows the HTTPS port automatically.
+- **HSTS is intentionally not enabled.** Browsers apply it to the whole
+  hostname regardless of port, so on `localhost` it would force HTTPS on your
+  other local services and make a self-signed certificate impossible to
+  bypass. Enable it only on a real domain with a trusted certificate.
 
 ## API
 
@@ -130,9 +170,12 @@ user-profile-app/
 ├── server.js              # Mongo connection + starts the app
 ├── models/
 │   └── User.js              # Mongoose schema
-├── frontend/                # Static frontend, served by nginx
+├── frontend/                # Static frontend, served by nginx over HTTPS
 │   ├── Dockerfile             # nginx image: static files + config baked in
-│   ├── nginx.conf             # serves the UI, proxies /api and /health to the app
+│   ├── templates/
+│   │   └── default.conf.template   # HTTP→HTTPS redirect, HTTPS site, /api + /health proxy
+│   ├── docker-entrypoint.d/
+│   │   └── 25-self-signed-cert.sh  # creates a self-signed certificate on first start
 │   └── public/
 │       ├── index.html
 │       ├── style.css
