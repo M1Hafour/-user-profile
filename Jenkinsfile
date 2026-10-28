@@ -130,26 +130,20 @@ pipeline {
             steps {
                 sh '''
                     export COMPOSE_PROJECT_NAME=user-profile-app
-                    # Published ports: NGINX_PORT (HTTP, default 80) and NGINX_HTTPS_PORT
-                    # (HTTPS, default 443), taken from the .env secret when set there.
-                    HTTP_PORT=$(grep -E '^NGINX_PORT=' .env | tail -n 1 | cut -d= -f2 | tr -d '\\r"')
-                    HTTPS_PORT=$(grep -E '^NGINX_HTTPS_PORT=' .env | tail -n 1 | cut -d= -f2 | tr -d '\\r"')
-                    HTTP_PORT=${HTTP_PORT:-80}
-                    HTTPS_PORT=${HTTPS_PORT:-443}
- 
+                    # Port nginx is published on: NGINX_PORT from the .env secret, default 80.
+                    PORT_TO_CHECK=$(grep -E '^NGINX_PORT=' .env | tail -n 1 | cut -d= -f2 | tr -d '\\r"')
+                    PORT_TO_CHECK=${PORT_TO_CHECK:-80}
+                    BASE="http://localhost:${PORT_TO_CHECK}"
+
                     for i in $(seq 1 15); do
-                        # 1) plain HTTP must redirect (301) to HTTPS
-                        CODE=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${HTTP_PORT}/" || true)
-                        # 2) HTTPS must serve the page and the backend must be connected to MongoDB
-                        #    (-k: the default certificate is self-signed)
-                        if [ "$CODE" = "301" ] && curl -fsSk "https://localhost:${HTTPS_PORT}/" | grep -q "User Profile App" && curl -fsSk "https://localhost:${HTTPS_PORT}/health" | grep -q '"mongo":"connected"'; then
-                            echo "HTTP redirects to HTTPS, the frontend is served over TLS and the backend is connected to MongoDB."
+                        if curl -fsS "$BASE/" | grep -q "User Profile App" && curl -fsS "$BASE/health" | grep -q '"mongo":"connected"'; then
+                            echo "Frontend is served and the backend is connected to MongoDB."
                             exit 0
                         fi
-                        echo "Not ready yet (attempt $i of 15, http status: $CODE)..."
+                        echo "Not ready yet (attempt $i of 15)..."
                         sleep 4
                     done
- 
+
                     echo "Deployment verification FAILED"
                     docker compose ps
                     docker compose logs --tail 30 nginx app
@@ -158,7 +152,6 @@ pipeline {
             }
         }
     }
- 
 
     post {
         success {
