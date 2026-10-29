@@ -14,14 +14,14 @@ pipeline {
         FULL_IMAGE            = "${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
         LATEST_IMAGE          = "${REGISTRY}/${IMAGE_NAME}:latest"
 
-        // Frontend (nginx + static files) image
-        FRONTEND_IMAGE_NAME   = 'user-profile-frontend'
-        FRONTEND_FULL_IMAGE   = "${REGISTRY}/${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}"
-        FRONTEND_LATEST_IMAGE = "${REGISTRY}/${FRONTEND_IMAGE_NAME}:latest"
-
         DOCKERHUB_CREDS      = credentials('dockerhub-creds')
-        MONGO_CREDS          = credentials('mongo-creds')
-        APP_ENV               = credentials('user-profile-app-env')
+
+        // ---- AWS deployment targets: set these three after creating the servers ----
+        // (see deploy/AWS-GUIDE.md, Part F). They are addresses, not secrets.
+        AWS_NGINX_HOST       = 'CHANGE_ME'   // Elastic IP of the public nginx server
+        AWS_PRIVATE1_IP      = 'CHANGE_ME'   // private IP of private1 (app + MongoDB)
+        AWS_PRIVATE2_IP      = 'CHANGE_ME'   // private IP of private2 (app)
+        // The SSH key is the Jenkins credential 'aws-ssh-key' (SSH Username with private key).
     }
 
     stages {
@@ -72,14 +72,11 @@ pipeline {
             }
         }
 
-        stage('Build Images') {
+        stage('Build Image') {
             steps {
-                // Backend (API) image
+                // Backend (API) image. The frontend is not an image: nginx on AWS serves
+                // frontend/public directly, and its config is checked by deploy/nginx/install.sh.
                 sh "docker build -t ${FULL_IMAGE} -t ${LATEST_IMAGE} ."
-                // Frontend image (nginx + static files); ./frontend is its build context
-                sh "docker build -t ${FRONTEND_FULL_IMAGE} -t ${FRONTEND_LATEST_IMAGE} ./frontend"
-                // Fail early if the nginx config baked into the frontend image is invalid
-                sh "docker run --rm ${FRONTEND_FULL_IMAGE} nginx -t"
             }
         }
 
@@ -87,13 +84,7 @@ pipeline {
             steps {
                 // Blocking: fails the build on HIGH/CRITICAL CVEs in the built image.
                 // Drop --exit-code / change severity if you want this informational instead.
-                // Scans both images and reports both before failing, so one run shows everything.
-                sh '''
-                    rc=0
-                    trivy image --timeout 15m --severity HIGH,CRITICAL --exit-code 1 ${FULL_IMAGE} || rc=1
-                    trivy image --timeout 15m --severity HIGH,CRITICAL --exit-code 1 ${FRONTEND_FULL_IMAGE} || rc=1
-                    exit $rc
-                '''
+                sh 'trivy image --timeout 15m --severity HIGH,CRITICAL --exit-code 1 ${FULL_IMAGE}'
             }
         }
 
@@ -103,50 +94,86 @@ pipeline {
                     echo "$DOCKERHUB_CREDS_PSW" | docker login -u "$DOCKERHUB_CREDS_USR" --password-stdin
                     docker push ${FULL_IMAGE}
                     docker push ${LATEST_IMAGE}
-                    docker push ${FRONTEND_FULL_IMAGE}
-                    docker push ${FRONTEND_LATEST_IMAGE}
                 '''
             }
         }
 
-        stage('Deploy') {
+        stage('Deploy to AWS') {
             steps {
-                sh '''
-                    cp "$APP_ENV" .env
-                    export MONGO_USERNAME="$MONGO_CREDS_USR"
-                    export MONGO_PASSWORD="$MONGO_CREDS_PSW"
-                    export COMPOSE_PROJECT_NAME=user-profile-app
-                    # Our two images (API + frontend) must really be pulled: if this fails,
-                    # stop here instead of silently redeploying a stale local copy.
-                    docker compose pull app nginx
-                    docker compose pull mongodb mongo-express || true
-                    docker compose up -d --remove-orphans
-                    docker image prune -f
-                '''
+                withCredentials([sshUserPrivateKey(credentialsId: 'aws-ssh-key', keyFileVariable: 'SSH_KEY', usernameVariable: 'SSH_USER')]) {
+                    sh '''
+                        set -eu
+
+                        # Stop early with a clear message if the targets were never filled in.
+                        for v in AWS_NGINX_HOST AWS_PRIVATE1_IP AWS_PRIVATE2_IP; do
+                            val=$(printenv "$v" || true)
+                            case "$val" in
+                                ""|CHANGE_ME*) echo "Set $v at the top of the Jenkinsfile (see deploy/AWS-GUIDE.md, Part F)."; exit 1 ;;
+                            esac
+                        done
+
+                        # SSH settings for this build only. The private servers have no public address,
+                        # so they are reached by jumping through the nginx server (ProxyJump).
+                        # accept-new: trust a server's key the first time, refuse it if it ever changes.
+                        SSH_CFG="$(mktemp)"
+                        trap 'rm -f "$SSH_CFG"' EXIT
+                        printf '%s\\n' \
+                            "Host *" \
+                            "  User $SSH_USER" \
+                            "  IdentityFile $SSH_KEY" \
+                            "  IdentitiesOnly yes" \
+                            "  BatchMode yes" \
+                            "  ConnectTimeout 15" \
+                            "  ServerAliveInterval 15" \
+                            "  StrictHostKeyChecking accept-new" \
+                            "  UserKnownHostsFile ${JENKINS_HOME:-$HOME}/aws_known_hosts" \
+                            "Host $AWS_PRIVATE1_IP $AWS_PRIVATE2_IP" \
+                            "  ProxyJump $AWS_NGINX_HOST" > "$SSH_CFG"
+
+                        ssh_run() { h="$1"; shift; ssh -F "$SSH_CFG" "$h" "$@"; }
+
+                        echo "== Checking SSH access to all three servers =="
+                        ssh_run "$AWS_NGINX_HOST"  true
+                        ssh_run "$AWS_PRIVATE1_IP" true
+                        ssh_run "$AWS_PRIVATE2_IP" true
+
+                        # On each server: check out exactly the commit Jenkins built (so scripts,
+                        # compose files and frontend files match the images), then deploy it.
+                        SYNC="cd ~/app && git fetch --quiet origin && git reset --hard $GIT_COMMIT"
+
+                        # Backends first, one at a time: while one restarts, nginx uses the other.
+                        # update-private.sh rolls itself back and fails if the new version is unhealthy.
+                        echo "== private2 =="
+                        ssh_run "$AWS_PRIVATE2_IP" "$SYNC && ./deploy/update-private.sh private2 $IMAGE_TAG"
+                        echo "== private1 =="
+                        ssh_run "$AWS_PRIVATE1_IP" "$SYNC && ./deploy/update-private.sh private1 $IMAGE_TAG"
+
+                        # Then nginx: new frontend files + config (install.sh checks the config and
+                        # restores the old one if nginx rejects it).
+                        echo "== nginx =="
+                        ssh_run "$AWS_NGINX_HOST" "$SYNC && ./deploy/nginx/install.sh"
+                    '''
+                }
             }
         }
 
         stage('Verify Deployment') {
             steps {
                 sh '''
-                    export COMPOSE_PROJECT_NAME=user-profile-app
-                    # Port nginx is published on: NGINX_PORT from the .env secret, default 80.
-                    PORT_TO_CHECK=$(grep -E '^NGINX_PORT=' .env | tail -n 1 | cut -d= -f2 | tr -d '\\r"')
-                    PORT_TO_CHECK=${PORT_TO_CHECK:-80}
-                    BASE="http://localhost:${PORT_TO_CHECK}"
+                    # Through the public address, the way a visitor reaches the site.
+                    BASE="http://${AWS_NGINX_HOST}"
 
                     for i in $(seq 1 15); do
-                        if curl -fsS "$BASE/" | grep -q "User Profile App" && curl -fsS "$BASE/health" | grep -q '"mongo":"connected"'; then
-                            echo "Frontend is served and the backend is connected to MongoDB."
+                        if curl -fsS --max-time 10 "$BASE/" | grep -q "User Profile App" && curl -fsS --max-time 10 "$BASE/health" | grep -q '"mongo":"connected"'; then
+                            echo "The site is served by nginx on AWS and the backend is connected to MongoDB."
                             exit 0
                         fi
                         echo "Not ready yet (attempt $i of 15)..."
                         sleep 4
                     done
 
-                    echo "Deployment verification FAILED"
-                    docker compose ps
-                    docker compose logs --tail 30 nginx app
+                    echo "Deployment verification FAILED: $BASE did not answer correctly."
+                    echo "On the servers: docker compose ps / docker compose logs app (private), sudo tail /var/log/nginx/error.log (nginx)."
                     exit 1
                 '''
             }

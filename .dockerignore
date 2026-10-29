@@ -1,18 +1,23 @@
+# Keep the backend image small and free of secrets. Only the app code and its
+# runtime dependencies go in (see Dockerfile: COPY . .).
 node_modules
 npm-debug.log
 .env
 .git
 .gitignore
 *.zip
+*.key
+*.crt
+*.pem
 Dockerfile
-docker-compose.yaml
 Jenkinsfile
 README.md
 frontend
-nginx
 __tests__
 coverage
 junit.xml
 jest.config.js
 eslint.config.js
+eslint.config.mjs
+deploy
 .*

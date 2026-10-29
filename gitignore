@@ -1,7 +1,0 @@
-*.crt
-*.key
-.env
-node_modules
-coverage
-junit.xml
-*.pem
