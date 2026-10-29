@@ -18,9 +18,9 @@ pipeline {
 
         // ---- AWS deployment targets: set these three after creating the servers ----
         // (see deploy/AWS-GUIDE.md, Part F). They are addresses, not secrets.
-        AWS_NGINX_HOST       = 13.63.124.225   // Elastic IP of the public nginx server
-        AWS_PRIVATE1_IP      = 10.0.140.207   // private IP of private1 (app + MongoDB)
-        AWS_PRIVATE2_IP      = 10.0.130.5   // private IP of private2 (app)
+        AWS_NGINX_HOST       = '13.63.124.225'   // Elastic IP of the public nginx server
+        AWS_PRIVATE1_IP      = '10.0.140.207'   // private IP of private1 (app + MongoDB)
+        AWS_PRIVATE2_IP      = '10.0.130.5'   // private IP of private2 (app)
         // The SSH key is the Jenkins credential 'aws-ssh-key' (SSH Username with private key).
     }
 
