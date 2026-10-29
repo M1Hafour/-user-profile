@@ -1,6 +1,6 @@
 # Complete /etc/nginx/nginx.conf for the PUBLIC subnet server (nginx installed
 # directly on the EC2 instance, no Docker). install.sh fills in the double-underscore
-# markers (user, web root, the two private IPs) and installs this file. It is the
+# markers (user, web root, the two private IPs, the certificate-check folder) and installs this file. It is the
 # only server the internet can reach: it serves the
 # frontend and load-balances /api and /health across the two private app servers.
 
@@ -67,6 +67,11 @@ http {
         # (nginx does not retry a POST/DELETE once the request was sent, so no double inserts.)
         proxy_next_upstream error timeout http_502 http_503 http_504;
         proxy_next_upstream_tries 2;
+
+        # Let's Encrypt writes its check files here during certificate renewal.
+        location /.well-known/acme-challenge/ {
+            root __ACME_ROOT__;
+        }
 
         # Answered by nginx itself (handy for a quick "is nginx up" check).
         location = /nginx-health {

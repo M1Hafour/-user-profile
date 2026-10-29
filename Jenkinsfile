@@ -18,9 +18,13 @@ pipeline {
 
         // ---- AWS deployment targets: set these three after creating the servers ----
         // (see deploy/AWS-GUIDE.md, Part F). They are addresses, not secrets.
-        AWS_NGINX_HOST       = '13.63.124.225'   // Elastic IP of the public nginx server
-        AWS_PRIVATE1_IP      = '10.0.140.207'   // private IP of private1 (app + MongoDB)
-        AWS_PRIVATE2_IP      = '10.0.130.5'   // private IP of private2 (app)
+        AWS_NGINX_HOST       = 'CHANGE_ME'   // Elastic IP of the public nginx server
+        AWS_PRIVATE1_IP      = 'CHANGE_ME'   // private IP of private1 (app + MongoDB)
+        AWS_PRIVATE2_IP      = 'CHANGE_ME'   // private IP of private2 (app)
+        // The HTTPS name of the site (e.g. myapp.duckdns.org): the same value as DOMAIN in
+        // deploy/nginx/.env, set once HTTPS is on (deploy/AWS-GUIDE.md, Part G). Verify uses it.
+        // Leave CHANGE_ME while the site is HTTP only.
+        AWS_DOMAIN           = 'CHANGE_ME'
         // The SSH key is the Jenkins credential 'aws-ssh-key' (SSH Username with private key).
     }
 
@@ -161,11 +165,18 @@ pipeline {
             steps {
                 sh '''
                     # Through the public address, the way a visitor reaches the site.
-                    BASE="http://${AWS_NGINX_HOST}"
+                    # With AWS_DOMAIN set, check HTTPS on that name (trusted certificate).
+                    # Otherwise check plain HTTP on the server address. That only works while
+                    # HTTPS is off: once a certificate exists, nginx redirects http to https, and
+                    # the redirect goes to the IP address, which the certificate does not cover.
+                    case "$AWS_DOMAIN" in
+                        ""|CHANGE_ME*) BASE="http://${AWS_NGINX_HOST}" ;;
+                        *)             BASE="https://${AWS_DOMAIN}" ;;
+                    esac
 
                     for i in $(seq 1 15); do
                         if curl -fsS --max-time 10 "$BASE/" | grep -q "User Profile App" && curl -fsS --max-time 10 "$BASE/health" | grep -q '"mongo":"connected"'; then
-                            echo "The site is served by nginx on AWS and the backend is connected to MongoDB."
+                            echo "The site is up at $BASE and the backend is connected to MongoDB."
                             exit 0
                         fi
                         echo "Not ready yet (attempt $i of 15)..."
@@ -173,6 +184,7 @@ pipeline {
                     done
 
                     echo "Deployment verification FAILED: $BASE did not answer correctly."
+                    echo "If HTTPS is on, set AWS_DOMAIN at the top of this Jenkinsfile to the name in DOMAIN (deploy/nginx/.env)."
                     echo "On the servers: docker compose ps / docker compose logs app (private), sudo tail /var/log/nginx/error.log (nginx)."
                     exit 1
                 '''

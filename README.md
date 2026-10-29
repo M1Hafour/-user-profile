@@ -58,6 +58,9 @@ audit, builds the backend image, scans it with Trivy, pushes it to Docker Hub, a
 deploys it over SSH to the AWS servers (rolling update, automatic rollback). It verifies
 the public site at the end.
 
+The public site is served over HTTPS with a free Let's Encrypt certificate for a DuckDNS
+name. The certificate renews itself.
+
 Setup, step by step: [deploy/AWS-GUIDE.md](deploy/AWS-GUIDE.md).
 
 ## Project structure
@@ -74,7 +77,7 @@ user-profile-app/
 ├── deploy/
 │   ├── AWS-GUIDE.md         # step-by-step AWS setup
 │   ├── update-private.sh    # run on the private servers by the pipeline
-│   ├── nginx/               # public server: install.sh and nginx config template
+│   ├── nginx/               # public server: install.sh, get-cert.sh (HTTPS), nginx config templates
 │   ├── private1/            # app + MongoDB (Docker Compose), backup.sh
 │   └── private2/            # app (Docker Compose)
 ├── jest.config.js

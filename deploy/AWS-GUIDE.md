@@ -9,7 +9,7 @@ private servers use Docker, for the backend and MongoDB.
 
 ```
                                 Internet
-                                   │ port 80
+                                   │ ports 80, 443
                            ┌───────▼────────┐
                            │ Internet       │
                            │ Gateway        │
@@ -19,7 +19,7 @@ private servers use Docker, for the backend and MongoDB.
 │  PUBLIC SUBNET                   │                                          │
 │  ┌──────────────────────┐        │     ┌──────────────┐                     │
 │  │ EC2 "nginx"          │        │     │ NAT Gateway  │◄── lets the private │
-│  │ Elastic IP, port 80  │        │     └──────▲───────┘    servers download │
+│  │ Elastic IP, 80 & 443 │        │     └──────▲───────┘    servers download │
 │  │ nginx installed on   │        │            │            Docker images    │
 │  │ the server (no       │        │            │            (outbound only)  │
 │  │ Docker): frontend,   │        │            │                             │
@@ -113,7 +113,10 @@ VPC (`profile-vpc`)**, not the default one. Make two:
 | Type | Port | Source |
 |---|---|---|
 | HTTP | 80 | Anywhere-IPv4 |
+| HTTPS | 443 | Anywhere-IPv4 |
 | SSH | 22 | My IP |
+
+(The HTTPS rule does nothing until Part G is done, so you can add it now or then.)
 
 `sg-private`
 
@@ -126,7 +129,7 @@ Then open `sg-private` again → **Edit inbound rules** → **Add rule**:
 Custom TCP, port **27017**, source **`sg-private`** (itself; the group must exist
 first). Save.
 
-What this enforces: the internet reaches only port 80 on `nginx`; only `nginx` reaches
+What this enforces: the internet reaches only ports 80 and 443 on `nginx`; only `nginx` reaches
 the apps (3000); only the private servers reach the database (27017).
 
 **B4. SSH key.** EC2 → Key Pairs. Reuse `profile-key` if you already have it, or create it
@@ -259,8 +262,8 @@ sudo systemctl status nginx                # active (running)
 
 ## Part D: test it
 
-1. Open **`http://<nginx Elastic IP>`** in your browser (use `http://`, there is no HTTPS
-   yet). You should see the app. Add a user, reload: it is still there.
+1. Open **`http://<nginx Elastic IP>`** in your browser (HTTPS comes in Part G; after that,
+   use your `https://` name). You should see the app. Add a user, reload: it is still there.
 2. See the balancing. On `nginx`:
    ```bash
    sudo tail -n 20 /var/log/nginx/access.log
@@ -331,8 +334,8 @@ files on the servers.
    by itself if unhealthy). Then `private1` the same way. While one restarts, nginx uses
    the other.
 4. The nginx server: runs `install.sh` (new frontend files, config check, reload).
-5. **Verify Deployment** opens `http://<Elastic IP>/` and `/health` from Jenkins and
-   checks the page and the database connection. A failure fails the build (and Slack tells you).
+5. **Verify Deployment** opens the site from Jenkins (`http://<Elastic IP>` until Part G,
+   `https://<AWS_DOMAIN>` after it) and checks the page and the database connection. A failure fails the build (and Slack tells you).
 
 **One-time setup:**
 
@@ -340,13 +343,15 @@ files on the servers.
    Kind **SSH Username with private key**, ID **`aws-ssh-key`**, Username **`ec2-user`**,
    Private Key → *Enter directly* → paste the whole content of `profile-key.pem`
    (from `-----BEGIN` to `-----END`). Save.
-2. **Fill in the three addresses** at the top of the `Jenkinsfile` (they replace
-   `CHANGE_ME`; these are addresses, not secrets) and push:
+2. **Fill in the addresses** at the top of the `Jenkinsfile` (they replace `CHANGE_ME`;
+   these are addresses, not secrets) and push:
    ```groovy
    AWS_NGINX_HOST  = '<nginx Elastic IP>'
    AWS_PRIVATE1_IP = '<private1 private IP>'
    AWS_PRIVATE2_IP = '<private2 private IP>'
+   AWS_DOMAIN      = 'CHANGE_ME'   // after Part G: your HTTPS name
    ```
+   Leave `AWS_DOMAIN` as `CHANGE_ME` until you have done Part G.
 3. **Let your machine reach the nginx server.** `sg-nginx` allows SSH (22) only from "My
    IP". Jenkins runs on your machine, so that rule must contain your **current public IP**.
    If your home IP changes, builds fail at "Checking SSH access" with a timeout: edit the
@@ -367,11 +372,69 @@ files on the servers.
 - The pipeline builds, scans and pushes only the **backend image**. There is no frontend
   image: nginx serves `frontend/public` from the repo.
 
+## Part G: turn on HTTPS (free name + Let's Encrypt)
+
+A trusted certificate is issued for a **name**, not an IP address, so you need a name. A
+free DuckDNS subdomain is enough. Do this after Parts C to F work over `http://`.
+
+1. **Get a name.** Go to **duckdns.org**, sign in, and create a subdomain (for example
+   `myprofile`). Set its IP to the **nginx Elastic IP** and click *update ip*. The name is
+   then `myprofile.duckdns.org`. Check it on your computer with `nslookup myprofile.duckdns.org`:
+   it should print the Elastic IP (it can take a few minutes).
+2. **Open port 443.** EC2 → Security Groups → `sg-nginx` → Edit inbound rules → Add rule:
+   **HTTPS**, port **443**, source **Anywhere-IPv4**. Keep HTTP 80 open: it answers the
+   certificate check and redirects visitors to HTTPS.
+3. **Log in to the nginx server** (as in C1) and get the new code and settings:
+   ```bash
+   cd ~/app && git pull
+   cd deploy/nginx
+   nano .env
+   ```
+   Keep `PRIVATE1_IP` and `PRIVATE2_IP`, and add these two lines:
+   ```
+   DOMAIN=myprofile.duckdns.org
+   CERT_EMAIL=you@example.com
+   ```
+   `CERT_EMAIL` is only for expiry warnings from Let's Encrypt.
+4. **Get the certificate:**
+   ```bash
+   ./get-cert.sh
+   ```
+   The script checks that the name points to this server, asks Let's Encrypt for a
+   certificate (the check goes through port 80), switches nginx to HTTPS, and sets up
+   automatic renewal. It ends with `HTTPS is working: https://myprofile.duckdns.org`.
+5. **Check it.** Open `https://myprofile.duckdns.org` (there is a padlock in the address
+   bar). `http://myprofile.duckdns.org` now redirects to HTTPS. Renewal runs by itself:
+   ```bash
+   systemctl list-timers certbot-renew.timer        # when the next check runs (twice a day)
+   sudo /opt/certbot/bin/certbot renew --dry-run    # test a renewal; changes nothing
+   ```
+6. **Tell Jenkins the name.** At the top of the `Jenkinsfile`, set
+   `AWS_DOMAIN = 'myprofile.duckdns.org'` (the same name as `DOMAIN`), then commit and push.
+   From now on Verify Deployment checks the HTTPS address. Without this change the Verify
+   stage fails, and its message says why.
+
+**Good to know:**
+- Every later deploy keeps HTTPS: `install.sh` uses the HTTPS settings by itself while the
+  certificate exists. You do not need to run `get-cert.sh` again.
+- Renewal is automatic (certbot renews when about 30 days are left) and reloads nginx.
+- For now browsers are told to use HTTPS only for one day (HSTS, `max-age=86400`). After
+  HTTPS has worked for a few weeks, change it to `max-age=31536000` (one year) in
+  `deploy/nginx/nginx-tls.conf.template`, push, and deploy.
+- Inside the VPC, nginx still talks to the app servers over plain HTTP on port 3000. That is
+  fine: those servers accept traffic only from `sg-nginx`.
+- If the Elastic IP ever changes, update the DuckDNS record as well.
+
 ## Troubleshooting
 
 | Symptom | What to check |
 |---|---|
-| Browser cannot connect | You used the **Elastic IP** and `http://`. `sg-nginx` allows HTTP 80 from Anywhere. The server is in the **public** subnet with a public IP. On it: `sudo systemctl status nginx` and `curl -s http://localhost/nginx-health`. |
+| Browser cannot connect | `sg-nginx` must allow HTTP 80 (and HTTPS 443 after Part G) from Anywhere. The server is in the **public** subnet with a public IP. On it: `sudo systemctl status nginx` and `curl -s http://localhost/nginx-health`. |
+| Browser says the connection is **not private** | You used `https://` with the Elastic IP, or a name that does not match the certificate. Use `https://<your name>` exactly as in `DOMAIN`. |
+| `get-cert.sh` says the name does not resolve, or points to another address | The DuckDNS name must have the nginx **Elastic IP** as its address. Fix it on duckdns.org, wait a few minutes, and run `./get-cert.sh` again. |
+| `get-cert.sh`: *certbot could not get a certificate* | Port 80 must be open from Anywhere in `sg-nginx`, and nothing else may answer on port 80. Let's Encrypt allows only a few failed attempts per hour per name, so wait an hour before you retry. |
+| Verify Deployment says *set AWS_DOMAIN* | HTTPS is on, but the `Jenkinsfile` still checks plain HTTP. Set `AWS_DOMAIN` (Part G, step 6) and push. |
+| Renewal failed | `sudo journalctl -u certbot-renew -n 50` shows why. nginx keeps the current certificate until it expires, and Let's Encrypt warns by email before that. Make sure port 80 is still open from Anywhere. |
 | **502 Bad Gateway** | Both apps are unreachable. On each private server `docker compose ps`; on the nginx server `sudo tail /var/log/nginx/error.log` shows which upstream failed. Check the IPs in `deploy/nginx/.env` are the **private** IPs, run `./install.sh` again after fixing, and check `sg-private` allows 3000 from `sg-nginx`. |
 | `./install.sh` stops with an ERROR | It prints the reason: a missing `.env`, an IP that is not a valid address, or an nginx syntax error (the previous config is restored automatically). |
 | 502 and the error log says `Permission denied` for the upstream | SELinux is in enforcing mode. Allow nginx to connect out: `sudo setsebool -P httpd_can_network_connect 1`. (Amazon Linux 2023 normally ships with it permissive.) |
@@ -406,11 +469,12 @@ private route table's `0.0.0.0/0` at it.
 
 ## Security notes
 
-- Only port 80 on `nginx` is open to the internet. The backends and the database have no
-  public IP; the security groups allow only the traffic shown in the diagram.
-- This setup is **HTTP only**: data between the browser and the site is not encrypted. A
-  trusted HTTPS certificate needs a domain name (a free DuckDNS name plus Let's Encrypt
-  works). Ask for it as the next step.
+- Only ports 80 and 443 on `nginx` are open to the internet. The backends and the database
+  have no public IP; the security groups allow only the traffic shown in the diagram.
+- After Part G the site is HTTPS: a Let's Encrypt certificate, TLS 1.2 and 1.3 only, and
+  plain HTTP is redirected to HTTPS. Before Part G nothing is encrypted.
+- Traffic between `nginx` and the app servers is plain HTTP inside the private network. Only
+  `sg-nginx` can reach the app servers on port 3000.
 - Mongo Express is deliberately not deployed (it has no login).
 - Not included: automatic deploys from Jenkins, off-server backups, monitoring. A billing
   alarm (Billing → Budgets) is a good first addition, especially with a NAT Gateway.
