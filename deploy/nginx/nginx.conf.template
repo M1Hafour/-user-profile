@@ -1,0 +1,101 @@
+# Complete /etc/nginx/nginx.conf for the PUBLIC subnet server (nginx installed
+# directly on the EC2 instance, no Docker). install.sh fills in the double-underscore
+# markers (user, web root, the two private IPs, the certificate-check folder) and installs this file. It is the
+# only server the internet can reach: it serves the
+# frontend and load-balances /api and /health across the two private app servers.
+
+user __NGINX_USER__;
+worker_processes auto;
+error_log /var/log/nginx/error.log notice;
+pid /run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    tcp_nopush on;
+    keepalive_timeout 65;
+    types_hash_max_size 4096;
+    server_tokens off;
+
+    log_format lb '$remote_addr [$time_local] "$request" $status $body_bytes_sent '
+                  'upstream=$upstream_addr upstream_status=$upstream_status rt=$request_time';
+    access_log /var/log/nginx/access.log lb;
+
+    # Light abuse protection for the API (per client IP).
+    limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;
+
+    upstream app_backend {
+        # Round robin between the two app servers in the private subnet.
+        # A server that fails twice in a row is skipped for 10 seconds.
+        server __PRIVATE1_IP__:3000 max_fails=2 fail_timeout=10s;
+        server __PRIVATE2_IP__:3000 max_fails=2 fail_timeout=10s;
+        keepalive 16;
+    }
+
+    server {
+        listen 80 default_server;
+        server_name _;
+
+        root __WEB_ROOT__;
+        index index.html;
+        client_max_body_size 1m;
+
+        gzip on;
+        gzip_min_length 256;
+        gzip_types text/css text/javascript application/javascript application/json text/plain;
+
+        # Security headers. nginx does NOT inherit these into a location that defines
+        # its own add_header, so don't add add_header inside the locations below.
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout    60s;
+        # Retry the other app server on connection errors and 502/503/504.
+        # (nginx does not retry a POST/DELETE once the request was sent, so no double inserts.)
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_next_upstream_tries 2;
+
+        # Let's Encrypt writes its check files here during certificate renewal.
+        location /.well-known/acme-challenge/ {
+            root __ACME_ROOT__;
+        }
+
+        # Answered by nginx itself (handy for a quick "is nginx up" check).
+        location = /nginx-health {
+            access_log off;
+            default_type text/plain;
+            return 200 "ok\n";
+        }
+
+        # --- Backend (balanced) ---
+        location /api/ {
+            limit_req zone=api burst=40 nodelay;
+            proxy_pass http://app_backend;
+        }
+
+        # App + MongoDB health (answered by whichever app server nginx picks).
+        location = /health {
+            proxy_pass http://app_backend;
+        }
+
+        # --- Frontend (static files) ---
+        location / {
+            try_files $uri $uri/ =404;
+            # Always revalidate (ETag -> 304) so a new deploy is picked up immediately.
+            expires -1;
+        }
+    }
+}

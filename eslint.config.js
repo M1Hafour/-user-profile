@@ -34,6 +34,20 @@ module.exports = [
     },
   },
   {
-    ignores: ['node_modules/**', 'coverage/**', 'public/**'],
+    // Browser code (served by nginx): browser globals instead of Node's.
+    files: ['frontend/public/**/*.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        fetch: 'readonly',
+        setTimeout: 'readonly',
+        console: 'readonly',
+      },
+    },
+  },
+  {
+    ignores: ['node_modules/**', 'coverage/**'],
   },
 ];

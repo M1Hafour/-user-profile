@@ -111,3 +111,11 @@ describe('GET /health', () => {
     expect(res.body).toHaveProperty('uptime');
   });
 });
+
+describe('API-only backend', () => {
+  it('does not serve the frontend (nginx does that)', async () => {
+    const res = await request(app).get('/');
+
+    expect(res.status).toBe(404);
+  });
+});

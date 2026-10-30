@@ -1,0 +1,2 @@
+# Never commit secrets from the servers.
+.env
